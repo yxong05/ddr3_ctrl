@@ -17,4 +17,7 @@ run_test() {
 for t in req fsm flow maint cmd_out rd_tag wr_data; do
   run_test "$t" "tb_$t.v" "../rtl/ddr3_$t.v"
 done
+for reuse in 0 1; do
+  run_test queued "-Ptb_queued.REUSE=$reuse" tb_queued.v ../rtl/ddr3_req_queue.v ../rtl/ddr3_fsm.v ../rtl/ddr3_flow.v
+done
 iverilog -g2012 -Wall -s ddr3_ctrl -o "$build_dir/top.vvp" ../rtl/*.v

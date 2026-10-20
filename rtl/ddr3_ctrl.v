@@ -53,7 +53,8 @@ module ddr3_ctrl #(
     parameter tZQCS = 64,
     parameter tZQI = 128_000_000,
     parameter tPRDI = 1_000_000,
-    parameter USER_REFRESH = "OFF"
+    parameter USER_REFRESH = "OFF",
+    parameter ROW_REUSE = 1
   )(
     input clk,
     input rst,
@@ -194,7 +195,7 @@ module ddr3_ctrl #(
   assign mc_reset_n = 1'b1;
   assign mc_cmd_wren = 1'b1;
   assign mc_ctl_wren = 1'b1;
-  // Only one request is active; all requests use bank-machine index 0.
+  // Bank-machine allocation remains fixed at index 0; verify against the generated MIG UI.
   assign bank_mach_next = {BM_CNT_WIDTH{1'b0}};
   assign ecc_err_addr = {MC_ERR_ADDR_WIDTH{1'b0}};
   assign ecc_single = {2*nCK_PER_CLK{1'b0}};
@@ -211,6 +212,7 @@ module ddr3_ctrl #(
   wire fire_act, fire_col, fire_pre, fire_ref, fire_zq;
   wire take_req, take_prd, idle_ns;
   wire req_valid, req_rd, req_prd, cur_rd;
+  wire next_hit;
   wire [BANK_WIDTH-1:0] req_bank;
   wire [ROW_WIDTH-1:0] req_row;
   wire [COL_WIDTH-1:0] req_col;
@@ -219,7 +221,7 @@ module ddr3_ctrl #(
   wire col_ok, col2_ok;
   wire rd_fifo_busy, rd_empty;
 
-  ddr3_req #(
+  ddr3_req_queue #(
     .TCQ (TCQ), .BANK_WIDTH (BANK_WIDTH), .ROW_WIDTH (ROW_WIDTH),
     .COL_WIDTH (COL_WIDTH), .TAGW (TAGW)
   ) u_req (
@@ -228,20 +230,21 @@ module ddr3_ctrl #(
     .data_buf_addr (data_buf_addr), .use_addr (use_addr),
     .accept (accept), .accept_ns (accept_ns),
     .init_calib_complete (init_calib_complete),
-    .idle_ns (idle_ns), .any_maint (any_maint),
+    .any_maint (any_maint),
     .take_req (take_req), .take_prd (take_prd),
-    .req_valid (req_valid),
+    .req_valid (req_valid), .next_hit (next_hit),
     .req_rd (req_rd), .req_prd (req_prd),
     .req_bank (req_bank), .req_row (req_row), .req_col (req_col),
     .req_tag (req_tag), .cur_rd (cur_rd)
   );
 
   ddr3_fsm #(
+    .REUSE_ROWS (ROW_REUSE),
     .TCQ (TCQ), .K_RCD (K_RCD), .K_RTP (K_RTP), .K_WR (K_WR), .K_RAS (K_RAS),
     .K_RP (K_RP), .K_RFC (K_RFC), .K_ZQ (K_ZQ)
   ) u_fsm (
     .clk (clk), .rst (rst), .init_calib_complete (init_calib_complete),
-    .req_valid (req_valid),
+    .req_valid (req_valid), .next_hit (next_hit),
     .ref_req (ref_req), .zq_req (zq_pend), .prd_req (prd_pend),
     .cur_rd (cur_rd), .req_prd (req_prd), .col_ok (col_ok), .col2_ok (col2_ok),
     .fire_act (fire_act), .fire_col (fire_col), .fire_pre (fire_pre),

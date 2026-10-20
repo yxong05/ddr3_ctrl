@@ -1,8 +1,9 @@
-// Closed-page command sequencing. K_* delays are in fabric clocks.
+// Command sequencing with optional same-row reuse. K_* delays are in fabric clocks.
 `timescale 1ps/1ps
 
 module ddr3_fsm #(
     parameter TCQ = 100,
+    parameter REUSE_ROWS = 0,
     parameter K_RCD = 1,
     parameter K_RTP = 1,
     parameter K_WR = 4,
@@ -16,6 +17,7 @@ module ddr3_fsm #(
     input init_calib_complete,
 
     input req_valid,
+    input next_hit,
     input ref_req,
     input zq_req,
     input prd_req,
@@ -60,6 +62,18 @@ module ddr3_fsm #(
 
   reg [7:0] ras_cnt;
   reg [7:0] pre_cnt;
+
+  // Seven reuses plus the initial request give at most eight bursts per ACT.
+  reg [3:0] row_reuse_count;
+  wire maintenance_pending = ref_req || zq_req || prd_req;
+  wire can_reuse_row = REUSE_ROWS && next_hit && !req_prd &&
+                       !maintenance_pending && (row_reuse_count < 4'd7);
+
+  always @(posedge clk) begin
+    if (rst || fire_act) row_reuse_count <= 4'd0;
+    else if (take_req && state == S_PRE)
+      row_reuse_count <= row_reuse_count + 4'd1;
+  end
 
   // k=1 enters nxt on the next cycle; longer delays spend k-1 cycles in S_WAIT.
   task goto_after (input [3:0] nxt, input [7:0] k);
@@ -115,8 +129,14 @@ module ddr3_fsm #(
 
       S_PRE:
         if (pre_cnt == 8'd0 && ras_cnt == 8'd0) begin
-          fire_pre = 1'b1;
-          goto_after(S_IDLE, W_RP);
+          // Keep the recovery waits before loading another same-row request.
+          if (can_reuse_row) begin
+            take_req = 1'b1;
+            state_ns = S_COL;
+          end else begin
+            fire_pre = 1'b1;
+            goto_after(S_IDLE, W_RP);
+          end
         end
 
       S_REF: begin
